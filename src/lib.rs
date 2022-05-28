@@ -1,3 +1,5 @@
+mod domain;
+
 /// Application runner
 ///
 /// Receives a String representing the filename of a CSV containing
