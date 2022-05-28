@@ -166,6 +166,32 @@ mod test {
     use rust_decimal_macros::dec;
 
     #[test]
+    fn test_resolve_out_of_order() {
+        let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231));
+        let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000));
+        let disp = Transaction::create_dispute(2, 1);
+        let resolve = Transaction::create_resolve(2, 1);
+
+        let mut account = Account::new(2);
+        account.add_transaction(dep1).unwrap();
+        account.add_transaction(dep2).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert_eq!(s.get_total(), dec!(15.7231));
+        assert_eq!(s.held, dec!(0));
+
+        account.add_transaction(resolve).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert!(s.get_total() == s.avaliable);
+        assert_eq!(s.get_total(), dec!(15.7231));
+        assert_eq!(s.held, dec!(0));
+
+        account.add_transaction(disp).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert_eq!(s.get_total(), dec!(15.7231));
+        assert_eq!(s.held, dec!(0));
+    }
+
+    #[test]
     fn test_resolve() {
         let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231));
         let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000));
