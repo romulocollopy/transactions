@@ -41,8 +41,8 @@ pub struct Account {
     client: u16,
     avaliable: Decimal,
     held: Decimal,
-    total: Decimal,
     locked: bool,
+    transactions: Vec<Transaction>,
 }
 
 impl Account {
@@ -50,17 +50,30 @@ impl Account {
         if self.client != t.client {
             return Err("Invalid transaction client for this account");
         }
-        match t.kind {
-            TransactionType::Deposit(amount) => {
-                self.total += amount;
-                Ok(())
-            }
-            TransactionType::Withdraw(amount) => {
-                self.total -= amount;
-                Ok(())
-            }
-            _ => Err("Not Implemented"),
+
+        self.transactions.push(t);
+        Ok(())
+    }
+
+    fn process_transactions(&mut self) -> Result<(), &str> {
+        for t in self.transactions.iter() {
+            match t.kind {
+                TransactionType::Deposit(amount) => {
+                    self.avaliable += amount;
+                }
+                TransactionType::Withdraw(amount) => {
+                    self.avaliable -= amount;
+                }
+                TransactionType::Dispute => {}
+                _ => return Err("Not Implemented"),
+            };
         }
+
+        Ok(())
+    }
+
+    fn get_total(&self) -> Decimal {
+        self.avaliable + self.held
     }
 
     fn new(client: u16) -> Self {
@@ -68,8 +81,8 @@ impl Account {
             client,
             avaliable: dec!(0),
             held: dec!(0),
-            total: dec!(0),
             locked: false,
+            transactions: vec![],
         }
     }
 }
@@ -84,10 +97,11 @@ mod test {
         let amount = dec!(11.01);
         let t = Transaction::create_deposit(2, 5, amount.clone());
         let mut account = Account::new(2);
-        assert_eq!(account.total, dec!(0));
+        assert_eq!(account.get_total(), dec!(0));
 
         account.add_transaction(t).unwrap();
-        assert_eq!(account.total, amount)
+        account.process_transactions().unwrap();
+        assert_eq!(account.get_total(), amount)
     }
 
     #[test]
@@ -95,10 +109,11 @@ mod test {
         let amount = dec!(11.01);
         let t = Transaction::create_withdraw(2, 5, amount.clone());
         let mut account = Account::new(2);
-        assert_eq!(account.total, dec!(0));
+        assert_eq!(account.get_total(), dec!(0));
 
         account.add_transaction(t).unwrap();
-        assert_eq!(account.total, amount * dec!(-1))
+        account.process_transactions().unwrap();
+        assert_eq!(account.get_total(), amount * dec!(-1))
     }
 
     #[test]
@@ -106,7 +121,6 @@ mod test {
         let amount = dec!(11.01);
         let t = Transaction::create_withdraw(999, 5, amount.clone());
         let mut account = Account::new(2);
-        assert_eq!(account.total, dec!(0));
 
         assert_eq!(
             account.add_transaction(t),
@@ -115,7 +129,7 @@ mod test {
     }
 
     #[test]
-    fn test_new_transaction_hash() {
+    fn test_new_transaction() {
         let client = 3;
         let kind = TransactionType::Withdraw(dec!(15.33));
         let tx = 12;
@@ -132,24 +146,24 @@ mod test {
     }
 
     #[test]
-    fn test_new_balance() {
+    fn test_new_account() {
         let client = 3;
-        let avaliable = dec!(12);
-        let total = dec!(12);
-        let held = dec!(15.33);
-        let locked = true;
-        let b = Account {
-            client,
-            avaliable,
-            held,
-            total,
-            locked,
-        };
+        let a = Account::new(client);
+        assert_eq!(a.client, client);
+        assert_eq!(a.avaliable, dec!(0));
+        assert_eq!(a.held, dec!(0));
+        assert_eq!(a.locked, false);
+    }
 
-        assert_eq!(b.client, client);
-        assert_eq!(b.avaliable, avaliable);
-        assert_eq!(b.total, total);
-        assert_eq!(b.held, held);
-        assert_eq!(b.locked, locked);
+    #[test]
+    fn test_get_total() {
+        let a = Account {
+            client: 3,
+            avaliable: dec!(12),
+            held: dec!(5),
+            locked: false,
+            transactions: vec![],
+        };
+        assert_eq!(a.get_total(), a.avaliable + a.held)
     }
 }
