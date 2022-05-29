@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -99,8 +101,7 @@ impl Account {
 
     fn take_snapshot(&mut self) -> Result<Snapshot, &str> {
         let mut s = Snapshot::new(self.client);
-
-        let mut transactions = self.transactions.clone();
+        let mut processing = self.transactions.clone();
 
         for t in self.transactions.iter() {
             match t.kind {
@@ -110,47 +111,63 @@ impl Account {
                 TransactionType::Withdraw(amount) => {
                     s.total -= amount;
                 }
-                TransactionType::Dispute => match Self::get_resolution(&t, &transactions) {
-                    Some(res) => {
-                        if let Some(tx) = transactions.iter().position(|x| x == res) {
-                            transactions.remove(tx);
-                        }
-                    }
-                    None => {
-                        self.open_dispute(&t, &mut s);
-                    }
-                },
+                TransactionType::Dispute => {
+                    self.open_dispute(&t, &mut s);
+                }
                 TransactionType::ChargeBack => {
-                    if let Some(disp) = Self::get_dispute(&t, &transactions) {
-                        if let Some(tx) = transactions.iter().position(|x| x == disp) {
-                            transactions.remove(tx);
-                        }
-                        self.apply_changeback(t, &mut s)
+                    // If there is no dispute, ignore
+                    if let Some(disp) = Self::get_disputed_transaction(&t, &processing) {
+                        self.apply_changeback(disp, &mut s).unwrap();
+                        processing.remove(
+                            processing
+                                .iter()
+                                .position(|x| x == disp)
+                                .expect("Dispute not found"),
+                        );
                     }
                 }
-                TransactionType::Resolve => {}
+                TransactionType::Resolve => {
+                    // If there is no dispute, ignore
+                    if let Some(disp) = Self::get_disputed_transaction(&t, &processing) {
+                        self.resolve(disp, &mut s).unwrap();
+                        processing.remove(
+                            processing
+                                .iter()
+                                .position(|x| x == disp)
+                                .expect("Dispute not found"),
+                        );
+                    }
+                }
             }
         }
 
         return Ok(s);
     }
 
-    fn apply_changeback(&self, t: &Transaction, s: &mut Snapshot) {
-        for r in self.transactions.iter() {
-            if r == t || r.tx != t.tx {
-                continue;
+    fn apply_changeback(&self, t: &Transaction, s: &mut Snapshot) -> Result<(), &str> {
+        let amount = match t.kind {
+            TransactionType::Deposit(amount) => Ok(amount),
+            TransactionType::Withdraw(amount) => Ok(amount),
+            _ => Err("Only Withdraw and Deposit can be changed back"),
+        }
+        .unwrap();
+
+        s.total -= amount;
+        s.held -= amount;
+        Ok(())
+    }
+
+    fn resolve(&self, t: &Transaction, s: &mut Snapshot) -> Result<(), &str> {
+        match t.kind {
+            TransactionType::Deposit(amount) => {
+                s.held -= amount;
+                Ok(())
             }
-            match r.kind {
-                TransactionType::Deposit(amount) => {
-                    println!("ChargeBack: {}", amount);
-                    s.held -= amount;
-                    s.total -= amount;
-                }
-                TransactionType::Withdraw(amount) => {
-                    s.held += amount;
-                }
-                _ => continue,
-            };
+            TransactionType::Withdraw(amount) => {
+                s.held -= amount;
+                Ok(())
+            }
+            _ => Err("Only Withdraw and Deposit can be changed back"),
         }
     }
 
@@ -164,42 +181,37 @@ impl Account {
                     s.held += amount;
                 }
                 TransactionType::Withdraw(amount) => {
-                    s.total -= amount;
-                    s.held -= amount;
+                    s.total += amount;
+                    s.held += amount;
                 }
                 _ => continue,
             }
         }
     }
 
-    fn get_resolution<'a>(
-        t: &'a Transaction,
-        transactions: &'a Vec<Transaction>,
+    fn get_disputed_transaction<'a>(
+        cashback: &'a Transaction,
+        processing_transactions: &'a Vec<Transaction>,
     ) -> Option<&'a Transaction> {
-        for r in transactions.iter() {
-            if r == t || r.tx != t.tx {
+        let mut related_transactions: HashMap<&str, &Transaction> = HashMap::new();
+
+        for r in processing_transactions.iter() {
+            if r == cashback || r.tx != cashback.tx {
                 continue;
             }
 
-            if let TransactionType::Resolve = r.kind {
-                return Some(r);
-            }
+            match r.kind {
+                TransactionType::Dispute => related_transactions.insert("dispute", r),
+                TransactionType::Withdraw(_) => related_transactions.insert("reversed", r),
+                TransactionType::Deposit(_) => related_transactions.insert("reversed", r),
+                _ => continue,
+            };
         }
-        None
-    }
 
-    fn get_dispute<'a>(
-        t: &'a Transaction,
-        transactions: &'a Vec<Transaction>,
-    ) -> Option<&'a Transaction> {
-        for r in transactions.iter() {
-            if r == t || r.tx != t.tx {
-                continue;
-            }
-
-            if let TransactionType::Dispute = r.kind {
-                return Some(r);
-            }
+        if let Some(_) = related_transactions.get("dispute") {
+            if let Some(rev) = related_transactions.get("reversed") {
+                return Some(*rev);
+            };
         }
         None
     }
@@ -218,33 +230,60 @@ mod test {
     use rust_decimal_macros::dec;
 
     #[test]
-    fn test_chargeback_out_of_order() {
-        let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231));
-        let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000));
-        let disp = Transaction::create_dispute(2, 1);
-        let chargeback = Transaction::create_chargeback(2, 1);
+    fn test_do_not_double_chargeback_withdraw() {
+        let dep = Transaction::create_deposit(2, 1, dec!(62.555));
+        let withdraw = Transaction::create_withdraw(2, 2, dec!(30.0000));
+        let disp = Transaction::create_dispute(2, withdraw.tx);
+        let chargeback = Transaction::create_chargeback(2, withdraw.tx);
+        let chargeback2 = Transaction::create_chargeback(2, withdraw.tx);
 
         let mut account = Account::new(2);
-        account.add_transaction(dep1).unwrap();
-        account.add_transaction(dep2).unwrap();
-        let s = account.take_snapshot().unwrap();
-        assert_eq!(s.total, dec!(15.7231));
-        assert_eq!(s.held, dec!(0));
-
-        account.add_transaction(chargeback).unwrap();
-        let s = account.take_snapshot().unwrap();
-        assert_eq!(s.total, dec!(15.7231));
-        assert_eq!(s.held, dec!(0));
+        account.add_transaction(dep).unwrap();
+        account.add_transaction(withdraw).unwrap();
 
         account.add_transaction(disp).unwrap();
         let s = account.take_snapshot().unwrap();
-        assert_eq!(s.get_available(), dec!(10.0000));
-        assert_eq!(s.held, dec!(0));
+        assert_eq!(s.get_available(), dec!(32.555));
+        assert_eq!(s.held, dec!(30));
+
+        account.add_transaction(chargeback).unwrap();
+        let s = account.take_snapshot().unwrap();
         assert_eq!(s.get_available(), s.total);
+        assert_eq!(s.total, dec!(32.555));
+        assert_eq!(s.held, dec!(0));
+
+        account.add_transaction(chargeback2).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert_eq!(s.get_available(), s.total);
+        assert_eq!(s.total, dec!(32.555));
+        assert_eq!(s.held, dec!(0));
     }
 
     #[test]
-    fn test_chargeback() {
+    fn test_chargeback_withdraw() {
+        let dep = Transaction::create_deposit(2, 1, dec!(62.555));
+        let withdraw = Transaction::create_withdraw(2, 2, dec!(30.0000));
+        let disp = Transaction::create_dispute(2, withdraw.tx);
+        let chargeback = Transaction::create_chargeback(2, withdraw.tx);
+
+        let mut account = Account::new(2);
+        account.add_transaction(dep).unwrap();
+        account.add_transaction(withdraw).unwrap();
+
+        account.add_transaction(disp).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert_eq!(s.get_available(), dec!(32.555));
+        assert_eq!(s.held, dec!(30));
+
+        account.add_transaction(chargeback).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert_eq!(s.get_available(), s.total);
+        assert_eq!(s.total, dec!(32.555));
+        assert_eq!(s.held, dec!(0));
+    }
+
+    #[test]
+    fn test_chargeback_deposit() {
         let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231));
         let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000));
         let disp = Transaction::create_dispute(2, 1);
@@ -267,36 +306,38 @@ mod test {
     }
 
     #[test]
-    fn test_resolve_out_of_order() {
-        let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231));
-        let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000));
-        let disp = Transaction::create_dispute(2, 1);
-        let resolve = Transaction::create_resolve(2, 1);
+    fn test_resolve_withdraw() {
+        let dep = Transaction::create_deposit(2, 1, dec!(57.231));
+        let withdraw = Transaction::create_withdraw(2, 2, dec!(10));
+        let disp = Transaction::create_dispute(2, withdraw.tx);
+        let resolve = Transaction::create_resolve(2, withdraw.tx);
 
         let mut account = Account::new(2);
-        account.add_transaction(dep1).unwrap();
-        account.add_transaction(dep2).unwrap();
+        account.add_transaction(dep).unwrap();
+        account.add_transaction(withdraw).unwrap();
         let s = account.take_snapshot().unwrap();
-        assert_eq!(s.get_available(), dec!(15.7231));
-        assert_eq!(s.held, dec!(0));
-
-        account.add_transaction(resolve).unwrap();
-        let s = account.take_snapshot().unwrap();
-        assert_eq!(s.total, dec!(15.7231));
+        assert_eq!(s.get_available(), dec!(47.231));
         assert_eq!(s.held, dec!(0));
 
         account.add_transaction(disp).unwrap();
         let s = account.take_snapshot().unwrap();
+        assert_eq!(s.total, dec!(57.231));
+        assert_eq!(s.get_available(), dec!(47.231));
+        assert_eq!(s.held, dec!(10));
+
+        account.add_transaction(resolve).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert_eq!(s.get_available(), s.total);
+        assert_eq!(s.get_available(), dec!(57.231));
         assert_eq!(s.held, dec!(0));
-        assert_eq!(s.get_available(), dec!(15.7231));
     }
 
     #[test]
-    fn test_resolve() {
+    fn test_resolve_deposit() {
         let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231));
         let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000));
-        let disp = Transaction::create_dispute(2, 1);
-        let resolve = Transaction::create_resolve(2, 1);
+        let disp = Transaction::create_dispute(2, dep1.tx);
+        let resolve = Transaction::create_resolve(2, dep1.tx);
 
         let mut account = Account::new(2);
         account.add_transaction(dep1).unwrap();
@@ -319,7 +360,28 @@ mod test {
     }
 
     #[test]
-    fn test_open_dispute() {
+    fn test_open_dispute_withdraw() {
+        let dep1 = Transaction::create_deposit(2, 1, dec!(57.2222));
+        let withdraw = Transaction::create_withdraw(2, 2, dec!(10));
+        let disp = Transaction::create_dispute(2, withdraw.tx);
+
+        let mut account = Account::new(2);
+        account.add_transaction(dep1).unwrap();
+        account.add_transaction(withdraw).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert_eq!(s.get_available(), dec!(47.2222));
+        assert_eq!(s.total, dec!(47.2222));
+        assert_eq!(s.held, dec!(0));
+
+        account.add_transaction(disp).unwrap();
+        let s = account.take_snapshot().unwrap();
+        assert_eq!(s.get_available(), dec!(47.2222));
+        assert_eq!(s.total, dec!(57.2222));
+        assert_eq!(s.held, dec!(10));
+    }
+
+    #[test]
+    fn test_open_dispute_deposit() {
         let dep1 = Transaction::create_deposit(2, 1, dec!(5.72));
         let dep2 = Transaction::create_deposit(2, 2, dec!(10));
         let disp = Transaction::create_dispute(2, 1);
