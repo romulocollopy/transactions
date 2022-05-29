@@ -116,6 +116,10 @@ impl Account {
                 }
                 TransactionType::ChargeBack => {
                     // If there is no dispute, ignore
+                    if s.locked {
+                        continue;
+                    }
+
                     if let Some(disp) = Self::get_disputed_transaction(&t, &processing) {
                         self.apply_changeback(disp, &mut s).unwrap();
                         processing.remove(
@@ -154,6 +158,7 @@ impl Account {
 
         s.total -= amount;
         s.held -= amount;
+        s.locked = true;
         Ok(())
     }
 
