@@ -1,7 +1,39 @@
 use std::collections::HashMap;
+use std::error::Error;
 
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+
+type ClientID = u16;
+
+pub struct Portfolio {
+    accounts: HashMap<ClientID, Account>,
+}
+
+impl Portfolio {
+    pub fn add_transaction(&mut self, t: Transaction) -> Result<(), Box<dyn Error>> {
+        let client: ClientID = t.client;
+
+        match self.accounts.get_mut(&client) {
+            Some(account) => {
+                account.add_transaction(t).unwrap();
+                Ok(())
+            }
+            None => {
+                let mut account = Account::new(client);
+                account.add_transaction(t).unwrap();
+                self.accounts.insert(client, account);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn new() -> Self {
+        Self {
+            accounts: HashMap::new(),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 enum TransactionType {
@@ -15,61 +47,76 @@ enum TransactionType {
 // Transaction is a financial transaction representation
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transaction {
-    client: u16,
+    client: ClientID,
     kind: TransactionType,
     tx: u32,
 }
 
 impl Transaction {
-    fn create_deposit(client: u16, tx: u32, amount: Decimal) -> Self {
-        Self {
+    pub fn create_deposit(
+        client: ClientID,
+        tx: u32,
+        amount: Decimal,
+    ) -> Result<Self, &'static str> {
+        if amount < dec!(0) {
+            return Err("Amount must be positive");
+        }
+        Ok(Self {
             client,
             tx,
             kind: TransactionType::Deposit(amount),
-        }
+        })
     }
 
-    fn create_withdraw(client: u16, tx: u32, amount: Decimal) -> Self {
-        Self {
+    pub fn create_withdraw(
+        client: ClientID,
+        tx: u32,
+        amount: Decimal,
+    ) -> Result<Self, &'static str> {
+        if amount < dec!(0) {
+            return Err("Amount must be positive");
+        }
+        Ok(Self {
             client,
             tx,
             kind: TransactionType::Withdraw(amount),
-        }
+        })
     }
 
-    fn create_dispute(client: u16, tx: u32) -> Self {
-        Self {
+    pub fn create_dispute(client: ClientID, tx: u32) -> Result<Self, &'static str> {
+        Ok(Self {
             client,
             tx,
             kind: TransactionType::Dispute,
-        }
+        })
     }
 
-    fn create_resolve(client: u16, tx: u32) -> Self {
-        Self {
+    pub fn create_resolve(client: ClientID, tx: u32) -> Result<Self, &'static str> {
+        Ok(Self {
             client,
             tx,
             kind: TransactionType::Resolve,
-        }
+        })
     }
-    fn create_chargeback(client: u16, tx: u32) -> Self {
-        Self {
+
+    pub fn create_chargeback(client: ClientID, tx: u32) -> Result<Self, &'static str> {
+        Ok(Self {
             client,
             tx,
             kind: TransactionType::ChargeBack,
-        }
+        })
     }
 }
 
 struct Snapshot {
-    client: u16,
+    client: ClientID,
     total: Decimal,
     held: Decimal,
     locked: bool,
 }
 
 impl Snapshot {
-    fn new(client: u16) -> Self {
+    fn new(client: ClientID) -> Self {
         Self {
             client,
             total: dec!(0),
@@ -84,8 +131,8 @@ impl Snapshot {
 }
 
 #[derive(Debug)]
-pub struct Account {
-    client: u16,
+struct Account {
+    client: ClientID,
     transactions: Vec<Transaction>,
 }
 
@@ -194,10 +241,10 @@ impl Account {
         }
     }
 
-    fn get_disputed_transaction<'a>(
-        cashback: &'a Transaction,
-        processing_transactions: &'a Vec<Transaction>,
-    ) -> Option<&'a Transaction> {
+    fn get_disputed_transaction<'b>(
+        cashback: &'b Transaction,
+        processing_transactions: &'b Vec<Transaction>,
+    ) -> Option<&'b Transaction> {
         let mut related_transactions: HashMap<&str, &Transaction> = HashMap::new();
 
         for r in processing_transactions.iter() {
@@ -221,7 +268,7 @@ impl Account {
         None
     }
 
-    fn new(client: u16) -> Self {
+    fn new(client: ClientID) -> Self {
         Self {
             client,
             transactions: vec![],
@@ -236,11 +283,11 @@ mod test {
 
     #[test]
     fn test_do_not_double_chargeback_withdraw() {
-        let dep = Transaction::create_deposit(2, 1, dec!(62.555));
-        let withdraw = Transaction::create_withdraw(2, 2, dec!(30.0000));
-        let disp = Transaction::create_dispute(2, withdraw.tx);
-        let chargeback = Transaction::create_chargeback(2, withdraw.tx);
-        let chargeback2 = Transaction::create_chargeback(2, withdraw.tx);
+        let dep = Transaction::create_deposit(2, 1, dec!(62.555)).unwrap();
+        let withdraw = Transaction::create_withdraw(2, 2, dec!(30.0000)).unwrap();
+        let disp = Transaction::create_dispute(2, withdraw.tx).unwrap();
+        let chargeback = Transaction::create_chargeback(2, withdraw.tx).unwrap();
+        let chargeback2 = Transaction::create_chargeback(2, withdraw.tx).unwrap();
 
         let mut account = Account::new(2);
         account.add_transaction(dep).unwrap();
@@ -266,10 +313,10 @@ mod test {
 
     #[test]
     fn test_chargeback_withdraw() {
-        let dep = Transaction::create_deposit(2, 1, dec!(62.555));
-        let withdraw = Transaction::create_withdraw(2, 2, dec!(30.0000));
-        let disp = Transaction::create_dispute(2, withdraw.tx);
-        let chargeback = Transaction::create_chargeback(2, withdraw.tx);
+        let dep = Transaction::create_deposit(2, 1, dec!(62.555)).unwrap();
+        let withdraw = Transaction::create_withdraw(2, 2, dec!(30.0000)).unwrap();
+        let disp = Transaction::create_dispute(2, withdraw.tx).unwrap();
+        let chargeback = Transaction::create_chargeback(2, withdraw.tx).unwrap();
 
         let mut account = Account::new(2);
         account.add_transaction(dep).unwrap();
@@ -289,10 +336,10 @@ mod test {
 
     #[test]
     fn test_chargeback_deposit() {
-        let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231));
-        let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000));
-        let disp = Transaction::create_dispute(2, 1);
-        let chargeback = Transaction::create_chargeback(2, 1);
+        let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231)).unwrap();
+        let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000)).unwrap();
+        let disp = Transaction::create_dispute(2, 1).unwrap();
+        let chargeback = Transaction::create_chargeback(2, 1).unwrap();
 
         let mut account = Account::new(2);
         account.add_transaction(dep1).unwrap();
@@ -312,10 +359,10 @@ mod test {
 
     #[test]
     fn test_resolve_withdraw() {
-        let dep = Transaction::create_deposit(2, 1, dec!(57.231));
-        let withdraw = Transaction::create_withdraw(2, 2, dec!(10));
-        let disp = Transaction::create_dispute(2, withdraw.tx);
-        let resolve = Transaction::create_resolve(2, withdraw.tx);
+        let dep = Transaction::create_deposit(2, 1, dec!(57.231)).unwrap();
+        let withdraw = Transaction::create_withdraw(2, 2, dec!(10)).unwrap();
+        let disp = Transaction::create_dispute(2, withdraw.tx).unwrap();
+        let resolve = Transaction::create_resolve(2, withdraw.tx).unwrap();
 
         let mut account = Account::new(2);
         account.add_transaction(dep).unwrap();
@@ -339,10 +386,10 @@ mod test {
 
     #[test]
     fn test_resolve_deposit() {
-        let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231));
-        let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000));
-        let disp = Transaction::create_dispute(2, dep1.tx);
-        let resolve = Transaction::create_resolve(2, dep1.tx);
+        let dep1 = Transaction::create_deposit(2, 1, dec!(5.7231)).unwrap();
+        let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000)).unwrap();
+        let disp = Transaction::create_dispute(2, dep1.tx).unwrap();
+        let resolve = Transaction::create_resolve(2, dep1.tx).unwrap();
 
         let mut account = Account::new(2);
         account.add_transaction(dep1).unwrap();
@@ -366,9 +413,9 @@ mod test {
 
     #[test]
     fn test_open_dispute_withdraw() {
-        let dep1 = Transaction::create_deposit(2, 1, dec!(57.2222));
-        let withdraw = Transaction::create_withdraw(2, 2, dec!(10));
-        let disp = Transaction::create_dispute(2, withdraw.tx);
+        let dep1 = Transaction::create_deposit(2, 1, dec!(57.2222)).unwrap();
+        let withdraw = Transaction::create_withdraw(2, 2, dec!(10)).unwrap();
+        let disp = Transaction::create_dispute(2, withdraw.tx).unwrap();
 
         let mut account = Account::new(2);
         account.add_transaction(dep1).unwrap();
@@ -387,9 +434,9 @@ mod test {
 
     #[test]
     fn test_open_dispute_deposit() {
-        let dep1 = Transaction::create_deposit(2, 1, dec!(5.72));
-        let dep2 = Transaction::create_deposit(2, 2, dec!(10));
-        let disp = Transaction::create_dispute(2, 1);
+        let dep1 = Transaction::create_deposit(2, 1, dec!(5.72)).unwrap();
+        let dep2 = Transaction::create_deposit(2, 2, dec!(10)).unwrap();
+        let disp = Transaction::create_dispute(2, 1).unwrap();
 
         let mut account = Account::new(2);
         account.add_transaction(dep1).unwrap();
@@ -407,7 +454,7 @@ mod test {
     #[test]
     fn test_deposit_to_account() {
         let amount = dec!(11.01);
-        let t = Transaction::create_deposit(2, 5, amount.clone());
+        let t = Transaction::create_deposit(2, 5, amount.clone()).unwrap();
         let mut account = Account::new(2);
         assert_eq!(account.take_snapshot().unwrap().get_available(), dec!(0));
 
@@ -419,7 +466,7 @@ mod test {
     #[test]
     fn test_withdraw_from_account() {
         let amount = dec!(11.01);
-        let t = Transaction::create_withdraw(2, 5, amount.clone());
+        let t = Transaction::create_withdraw(2, 5, amount.clone()).unwrap();
         let mut account = Account::new(2);
         assert_eq!(account.take_snapshot().unwrap().get_available(), dec!(0));
 
@@ -432,7 +479,7 @@ mod test {
 
     #[test]
     fn test_mismatching_client() {
-        let t = Transaction::create_withdraw(999, 5, dec!(11.01));
+        let t = Transaction::create_withdraw(999, 5, dec!(11.01)).unwrap();
         let mut account = Account::new(2);
 
         assert_eq!(
