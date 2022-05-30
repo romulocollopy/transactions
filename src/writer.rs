@@ -25,7 +25,8 @@ pub fn write_headers() {
     };
     wtr.serialize(row).unwrap();
     let data = String::from_utf8(wtr.into_inner().unwrap()).unwrap();
-    print!("{}", data)
+    let vec: Vec<&str> = data.split("\n").collect();
+    println!("{}", vec[0])
 }
 
 pub fn write(s: Snapshot) {

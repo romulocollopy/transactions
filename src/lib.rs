@@ -12,7 +12,7 @@ use writer::{write, write_headers};
 /// After processing the complete set of payments output the client account balances
 ///
 /// ```
-/// let result = transactions_handler::run(String::from("myfile.csv"));
+/// let result = transactions_handler::run(String::from("tests/transactions.csv"));
 /// assert_eq!(result, ());
 /// ```
 pub fn run(filename: String) {
@@ -27,15 +27,5 @@ pub fn run(filename: String) {
                 break;
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_run() {
-        assert_eq!(run(String::from("myfile.csv")), ());
     }
 }
