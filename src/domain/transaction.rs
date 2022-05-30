@@ -6,6 +6,7 @@ use rust_decimal_macros::dec;
 
 type ClientID = u16;
 
+#[derive(Debug)]
 pub struct Portfolio {
     accounts: HashMap<ClientID, Account>,
 }
@@ -479,6 +480,17 @@ mod test {
 
     #[test]
     fn test_mismatching_client() {
+        let t = Transaction::create_withdraw(999, 5, dec!(11.01)).unwrap();
+        let mut account = Account::new(2);
+
+        assert_eq!(
+            account.add_transaction(t),
+            Err("Invalid transaction client for this account")
+        );
+    }
+
+    #[test]
+    fn test_negative_amount() {
         let t = Transaction::create_withdraw(999, 5, dec!(11.01)).unwrap();
         let mut account = Account::new(2);
 

@@ -22,44 +22,46 @@ pub fn get_reader(filename: String) -> Reader<File> {
         .unwrap()
 }
 
-pub fn get_content<R>(rdr: &mut Reader<R>) -> Result<(), Box<dyn Error>>
+pub fn get_content<R>(rdr: &mut Reader<R>) -> Result<Portfolio, &str>
 where
     R: io::Read,
 {
     let mut portfolio = Portfolio::new();
     for result in rdr.deserialize() {
-        let record: TransactionRow = result?;
+        let record: TransactionRow = match result {
+            Ok(transaction) => transaction,
+            _ => return Err("Error parsing transactions"),
+        };
+
         match record.r#type.as_str() {
             "deposit" => {
                 let t =
-                    Transaction::create_deposit(record.client, record.tx, record.amount.unwrap())
-                        .unwrap();
-                portfolio.add_transaction(t);
+                    Transaction::create_deposit(record.client, record.tx, record.amount.unwrap())?;
+                portfolio.add_transaction(t).unwrap();
             }
             "withdrawal" => {
                 let t =
-                    Transaction::create_withdraw(record.client, record.tx, record.amount.unwrap())
-                        .unwrap();
-                portfolio.add_transaction(t);
+                    Transaction::create_withdraw(record.client, record.tx, record.amount.unwrap())?;
+                portfolio.add_transaction(t).unwrap();
             }
             "dispute" => {
-                let t = Transaction::create_dispute(record.client, record.tx).unwrap();
-                portfolio.add_transaction(t);
+                let t = Transaction::create_dispute(record.client, record.tx)?;
+                portfolio.add_transaction(t).unwrap();
             }
 
             "chargeback" => {
-                let t = Transaction::create_chargeback(record.client, record.tx).unwrap();
-                portfolio.add_transaction(t);
+                let t = Transaction::create_chargeback(record.client, record.tx)?;
+                portfolio.add_transaction(t).unwrap();
             }
 
             "resolve" => {
-                let t = Transaction::create_resolve(record.client, record.tx).unwrap();
-                portfolio.add_transaction(t);
+                let t = Transaction::create_resolve(record.client, record.tx)?;
+                portfolio.add_transaction(t).unwrap();
             }
             _ => {}
         }
     }
-    Ok(())
+    Ok(portfolio)
 }
 
 pub fn get_filename(arguments: Vec<String>) -> Result<String, &'static str> {
@@ -87,12 +89,25 @@ withdrawal, 2, 5, 3.0
 chargeback, 1, 3";
 
     #[test]
-    fn test_get_content() {
+    fn test_get_content_runs() {
         let mut rdr = ReaderBuilder::new()
             .flexible(true)
             .trim(Trim::All)
             .from_reader(DATA.as_bytes());
-        let result = get_content(&mut rdr).unwrap();
+        get_content(&mut rdr).unwrap();
+    }
+
+    #[test]
+    fn test_get_content_error() {
+        let data = format!("{}\n{}", DATA, "deposit,1,1,-23");
+        let mut rdr = ReaderBuilder::new()
+            .flexible(true)
+            .trim(Trim::All)
+            .from_reader(data.as_bytes());
+        assert_eq!(
+            get_content(&mut rdr).unwrap_err(),
+            "Amount must be positive"
+        );
     }
 
     #[test]
