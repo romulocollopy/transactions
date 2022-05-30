@@ -1,37 +1,49 @@
-use std::collections::HashMap;
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 type ClientID = u16;
+type TransactionID = u32;
 
 #[derive(Debug)]
 pub struct Portfolio {
-    accounts: HashMap<ClientID, Account>,
+    accounts: Vec<Account>,
+    _pos: i32,
 }
 
 impl Portfolio {
     pub fn add_transaction(&mut self, t: Transaction) -> Result<(), Box<dyn Error>> {
         let client: ClientID = t.client;
 
-        match self.accounts.get_mut(&client) {
-            Some(account) => {
-                account.add_transaction(t).unwrap();
-                Ok(())
-            }
-            None => {
-                let mut account = Account::new(client);
-                account.add_transaction(t).unwrap();
-                self.accounts.insert(client, account);
-                Ok(())
+        for account in self.accounts.iter_mut() {
+            if account.client == client {
+                account.add_transaction(t.clone())?;
+                return Ok(());
             }
         }
+
+        let mut account = Account::new(client);
+        account.add_transaction(t.clone())?;
+        self.accounts.push(account);
+
+        Ok(())
     }
 
     pub fn new() -> Self {
         Self {
-            accounts: HashMap::new(),
+            accounts: vec![],
+            _pos: 0,
+        }
+    }
+
+    pub fn get_snapshot_line(&mut self) -> Option<Snapshot> {
+        match self.accounts.get_mut(self._pos as usize) {
+            Some(account) => {
+                self._pos += 1;
+                Some(account.take_snapshot().unwrap())
+            }
+            _ => None,
         }
     }
 }
@@ -50,13 +62,13 @@ enum TransactionType {
 pub struct Transaction {
     client: ClientID,
     kind: TransactionType,
-    tx: u32,
+    tx: TransactionID,
 }
 
 impl Transaction {
     pub fn create_deposit(
         client: ClientID,
-        tx: u32,
+        tx: TransactionID,
         amount: Decimal,
     ) -> Result<Self, &'static str> {
         if amount < dec!(0) {
@@ -71,7 +83,7 @@ impl Transaction {
 
     pub fn create_withdraw(
         client: ClientID,
-        tx: u32,
+        tx: TransactionID,
         amount: Decimal,
     ) -> Result<Self, &'static str> {
         if amount < dec!(0) {
@@ -84,7 +96,7 @@ impl Transaction {
         })
     }
 
-    pub fn create_dispute(client: ClientID, tx: u32) -> Result<Self, &'static str> {
+    pub fn create_dispute(client: ClientID, tx: TransactionID) -> Result<Self, &'static str> {
         Ok(Self {
             client,
             tx,
@@ -92,7 +104,7 @@ impl Transaction {
         })
     }
 
-    pub fn create_resolve(client: ClientID, tx: u32) -> Result<Self, &'static str> {
+    pub fn create_resolve(client: ClientID, tx: TransactionID) -> Result<Self, &'static str> {
         Ok(Self {
             client,
             tx,
@@ -100,7 +112,7 @@ impl Transaction {
         })
     }
 
-    pub fn create_chargeback(client: ClientID, tx: u32) -> Result<Self, &'static str> {
+    pub fn create_chargeback(client: ClientID, tx: TransactionID) -> Result<Self, &'static str> {
         Ok(Self {
             client,
             tx,
@@ -109,11 +121,12 @@ impl Transaction {
     }
 }
 
-struct Snapshot {
-    client: ClientID,
-    total: Decimal,
-    held: Decimal,
-    locked: bool,
+#[derive(Debug)]
+pub struct Snapshot {
+    pub client: ClientID,
+    pub total: Decimal,
+    pub held: Decimal,
+    pub locked: bool,
 }
 
 impl Snapshot {
@@ -126,7 +139,7 @@ impl Snapshot {
         }
     }
 
-    fn get_available(&self) -> Decimal {
+    pub fn get_available(&self) -> Decimal {
         self.total - self.held
     }
 }

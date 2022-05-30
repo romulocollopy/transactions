@@ -1,5 +1,9 @@
 mod domain;
 pub mod reader;
+pub mod writer;
+
+use reader::{get_content, get_reader};
+use writer::{write, write_headers};
 
 /// Application runner
 ///
@@ -12,7 +16,18 @@ pub mod reader;
 /// assert_eq!(result, ());
 /// ```
 pub fn run(filename: String) {
-    println!("Opening \"{}\"", filename)
+    let mut rdr = get_reader(filename);
+    let mut portfolio = get_content(&mut rdr).unwrap();
+
+    write_headers();
+    loop {
+        match portfolio.get_snapshot_line() {
+            Some(s) => write(s),
+            _ => {
+                break;
+            }
+        }
+    }
 }
 
 #[cfg(test)]

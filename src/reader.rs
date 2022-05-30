@@ -2,7 +2,7 @@ use csv::Reader;
 use csv::{ReaderBuilder, Trim};
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use std::{error::Error, fs::File, io};
+use std::{fs::File, io};
 
 use crate::domain::transaction::{Portfolio, Transaction};
 
