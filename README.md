@@ -30,4 +30,4 @@ client,avaliable,held,total,locked
 
 ## Business Rules
 
-The business rules are described in `src/domain/transaction.rs`
+The business rules are described in the [tests](https://github.com/romulocollopy/transactions/blob/main/src/domain/account.rs#L202)
