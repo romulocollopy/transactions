@@ -1,4 +1,4 @@
-use crate::domain::transaction::Snapshot;
+use crate::domain::Snapshot;
 use csv::WriterBuilder;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;

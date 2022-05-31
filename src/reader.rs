@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::{fs::File, io};
 
-use crate::domain::transaction::{Portfolio, Transaction};
+use crate::domain::{Portfolio, Transaction};
 
 #[derive(Debug, Deserialize)]
 struct TransactionRow {
