@@ -107,6 +107,7 @@ impl Account {
         }
         .unwrap();
 
+        self.disputed_transactions.remove(&disputed.tx);
         self.snapshot.total -= amount;
         self.snapshot.held -= amount;
         self.snapshot.locked = true;
@@ -117,10 +118,12 @@ impl Account {
         match disputed.kind {
             TransactionType::Deposit(amount) => {
                 self.snapshot.held -= amount;
+                self.disputed_transactions.remove(&disputed.tx);
                 Ok(())
             }
             TransactionType::Withdraw(amount) => {
                 self.snapshot.held -= amount;
+                self.disputed_transactions.remove(&disputed.tx);
                 Ok(())
             }
             _ => Err("Only Withdraw and Deposit can be changed back"),
@@ -239,6 +242,7 @@ mod test {
         let withdraw = Transaction::create_withdraw(2, 2, dec!(30.0000)).unwrap();
         let disp = Transaction::create_dispute(2, withdraw.tx).unwrap();
         let chargeback = Transaction::create_chargeback(2, withdraw.tx).unwrap();
+        let chargeback_tx = chargeback.tx;
 
         let mut account = Account::new(2);
         account.add_transaction(dep).unwrap();
@@ -254,6 +258,9 @@ mod test {
         assert_eq!(s.get_available(), s.total);
         assert_eq!(s.total, dec!(32.555));
         assert_eq!(s.held, dec!(0));
+        if let Some(_) = account.disputed_transactions.get(&chargeback_tx) {
+            panic!("disputedshould be removed");
+        };
     }
 
     #[test]
@@ -262,6 +269,7 @@ mod test {
         let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000)).unwrap();
         let disp = Transaction::create_dispute(2, 1).unwrap();
         let chargeback = Transaction::create_chargeback(2, 1).unwrap();
+        let chargeback_tx = chargeback.tx;
 
         let mut account = Account::new(2);
         account.add_transaction(dep1).unwrap();
@@ -277,6 +285,9 @@ mod test {
         assert_eq!(s.get_available(), s.total);
         assert_eq!(s.total, dec!(10.0000));
         assert_eq!(s.held, dec!(0));
+        if let Some(_) = account.disputed_transactions.get(&chargeback_tx) {
+            panic!("disputedshould be removed");
+        };
     }
 
     #[test]
@@ -285,6 +296,7 @@ mod test {
         let withdraw = Transaction::create_withdraw(2, 2, dec!(10)).unwrap();
         let disp = Transaction::create_dispute(2, withdraw.tx).unwrap();
         let resolve = Transaction::create_resolve(2, withdraw.tx).unwrap();
+        let resolve_tx = resolve.tx;
 
         let mut account = Account::new(2);
         account.add_transaction(dep).unwrap();
@@ -304,6 +316,9 @@ mod test {
         assert_eq!(s.get_available(), s.total);
         assert_eq!(s.get_available(), dec!(57.231));
         assert_eq!(s.held, dec!(0));
+        if let Some(_) = account.disputed_transactions.get(&resolve_tx) {
+            panic!("disputedshould be removed");
+        };
     }
 
     #[test]
@@ -312,6 +327,7 @@ mod test {
         let dep2 = Transaction::create_deposit(2, 2, dec!(10.0000)).unwrap();
         let disp = Transaction::create_dispute(2, dep1.tx).unwrap();
         let resolve = Transaction::create_resolve(2, dep1.tx).unwrap();
+        let resolve_tx = resolve.tx;
 
         let mut account = Account::new(2);
         account.add_transaction(dep1).unwrap();
@@ -331,6 +347,9 @@ mod test {
         assert_eq!(s.get_available(), s.total);
         assert_eq!(s.get_available(), dec!(15.7231));
         assert_eq!(s.held, dec!(0));
+        if let Some(_) = account.disputed_transactions.get(&resolve_tx) {
+            panic!("disputedshould be removed");
+        };
     }
 
     #[test]
