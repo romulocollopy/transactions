@@ -7,7 +7,7 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 struct SnapshotRow {
     client: u16,
-    avaliable: Decimal,
+    available: Decimal,
     held: Decimal,
     total: Decimal,
     locked: bool,
@@ -20,7 +20,7 @@ pub fn write_headers() {
         client: 0,
         total: dec!(0),
         held: dec!(0),
-        avaliable: dec!(0),
+        available: dec!(0),
         locked: false,
     };
     wtr.serialize(row).unwrap();
@@ -34,7 +34,7 @@ pub fn write(s: Snapshot) {
         client: s.client,
         total: s.total,
         held: s.held,
-        avaliable: s.get_available(),
+        available: s.get_available(),
         locked: s.locked,
     };
 

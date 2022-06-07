@@ -23,7 +23,7 @@ chargeback, 1, 3
 
 And the output:
 ```csv
-client,avaliable,held,total,locked
+client,available,held,total,locked
 1,1.0,0,1.0,true
 2,-1,0,-1,false
 ```
